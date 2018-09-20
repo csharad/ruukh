@@ -1,4 +1,5 @@
 language: rust
+cache: cargo
 
 INSTALL_GECKODRIVER: &INSTALL_GECKODRIVER
   |
@@ -39,4 +40,3 @@ matrix:
         - cargo build --manifest-path codegen/Cargo.toml
         - cargo test --manifest-path Cargo.toml
         - cargo test --manifest-path codegen/Cargo.toml
-        
