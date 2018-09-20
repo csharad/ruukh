@@ -12,17 +12,14 @@ INSTALL_CHROMEDRIVER: &INSTALL_CHROMEDRIVER
     unzip chromedriver_linux64.zip
     export CHROMEDRIVER_ARGS=--verbose
 
-INSTALL_WASM_BINDGEN_CLI: &INSTALL_WASM_BINDGEN_CLI
-  |
-    cargo install wasm-bindgen-cli
-
 matrix:
   include:
     - rust: nightly
       install: 
+        - rustup target add wasm32-unknown-unknown
         - *INSTALL_GECKODRIVER
         - *INSTALL_CHROMEDRIVER
-        - *INSTALL_WASM_BINDGEN_CLI
+        - cargo install wasm-bindgen-cli
 
       script:
         - export RUST_LOG=wasm_bindgen_test_runner
