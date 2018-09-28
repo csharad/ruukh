@@ -228,5 +228,5 @@ impl AppMount for String {
 /// For use in tests.
 #[cfg(test)]
 fn message_sender() -> MessageSender {
-    ReactiveApp::new().1
+    app_message_channel().1
 }
