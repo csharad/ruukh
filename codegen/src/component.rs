@@ -122,9 +122,14 @@ impl ComponentMeta {
         if self.props_meta.fields.is_empty() && self.state_meta.fields.is_empty() {
             quote!()
         } else {
-            let ident = &self.state_meta.ident;
+            let state_ty = if self.state_meta.fields.is_empty() {
+                quote!(())
+            } else {
+                let ident = &self.state_meta.ident;
+                quote!(#ident)
+            };
             quote! {
-                __status__: std::rc::Rc<std::cell::RefCell<ruukh::component::Status<#ident>>>,
+                __status__: std::rc::Rc<std::cell::RefCell<ruukh::component::Status<#state_ty>>>,
             }
         }
     }
