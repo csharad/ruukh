@@ -1,87 +1,15 @@
+use self::parser::{EventSyntax, EventsSyntax};
 use crate::suffix::{EVENT_PROPS_SUFFIX, EVENT_SUFFIX};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use std::mem;
 use syn::{
-    parenthesized,
-    parse::{Error, Parse, ParseStream, Result as ParseResult},
+    parse::{Error, Result as ParseResult},
     spanned::Spanned,
-    Attribute, FnArg, Ident, Pat, ReturnType, Token, Type, Visibility,
+    Attribute, FnArg, Ident, ItemStruct, Pat, ReturnType, Type, Visibility,
 };
 
-/// The syntax for the `#[events]` attribute TokenStream.
-///
-/// i.e. Parses ```ignore,compile_fail
-/// #[events(
-///     fn event_name(&self, arg: type, ...) -> type;
-///     fn event_name(&self, arg: type, ...) -> type;
-///     fn event_name(&self, arg: type, ...) -> type;
-/// )]```
-struct EventsSyntax {
-    events: Vec<EventSyntax>,
-}
-
-impl Parse for EventsSyntax {
-    fn parse(input: ParseStream<'_>) -> ParseResult<Self> {
-        let content;
-        parenthesized!(content in input);
-
-        let mut events = vec![];
-        while !content.is_empty() {
-            let event: EventSyntax = content.parse()?;
-            events.push(event);
-        }
-        Ok(EventsSyntax { events })
-    }
-}
-
-/// The syntax of a single event.
-///
-/// ```ignore,compile_fail
-/// #[optional]
-/// fn event_name(&self, arg: type, ...) -> type;
-/// ```
-struct EventSyntax {
-    attrs: Vec<Attribute>,
-    ident: Ident,
-    args: Vec<FnArg>,
-    return_type: ReturnType,
-}
-
-impl Parse for EventSyntax {
-    fn parse(input: ParseStream<'_>) -> ParseResult<Self> {
-        let attrs = input.call(Attribute::parse_outer)?;
-        input.parse::<Token![fn]>()?;
-        let ident = input.parse()?;
-
-        let content;
-        parenthesized!(content in input);
-        let args = content
-            .parse_terminated::<_, Token![,]>(FnArg::parse)?
-            .into_iter()
-            .collect();
-
-        let return_type = input.parse()?;
-        // The `#[component]` macro was pointed to when the last one errored.
-        if input.peek(Token![;]) {
-            input.parse::<Token![;]>()?;
-        } else {
-            Err(input.error("expected `;`"))?;
-        }
-
-        Ok(EventSyntax {
-            attrs,
-            ident,
-            args,
-            return_type,
-        })
-    }
-}
-
-impl EventSyntax {
-    fn attribute_span(&self) -> Option<Span> {
-        self.attrs.get(0).map(|attr| attr.span())
-    }
-}
+mod parser;
 
 /// Stores all the events declared on a component.
 pub struct EventsMeta {
@@ -91,94 +19,47 @@ pub struct EventsMeta {
     /// serves as an intermediate event type before converting it to the
     /// above event type.
     pub event_props_ident: Ident,
+    /// Ident of the component.
+    pub component_ident: Ident,
+    /// Visibility of the component.
+    pub vis: Visibility,
     /// All the event declarations on the component.
     pub events: Vec<EventMeta>,
 }
 
 impl EventsMeta {
-    pub fn take_events_attributes(
-        component_ident: &Ident,
-        attrs: Vec<Attribute>,
-    ) -> ParseResult<(Option<EventsMeta>, Vec<Attribute>)> {
-        let events_kind = Ident::new("events", Span::call_site()).into();
-        let (event_attrs, rest): (Vec<_>, Vec<_>) =
-            attrs.into_iter().partition(|attr| attr.path == events_kind);
+    pub fn parse(component: &mut ItemStruct) -> ParseResult<EventsMeta> {
+        let mut attrs = vec![];
+        mem::swap(&mut component.attrs, &mut attrs);
+        let (event_attrs, rest) = Self::partition_event_attributes(attrs);
+        // Reassign the remaining attributes to the struct for other uses.
+        component.attrs = rest;
 
         let event_metas: ParseResult<Vec<Vec<EventMeta>>> = event_attrs
             .into_iter()
-            .map(|attr| {
-                let parsed: EventsSyntax = syn::parse2(attr.tts)?;
-                let mut event_metas = vec![];
-
-                for event in parsed.events {
-                    // Grab the arguments pat and type from the event declaration while
-                    // skipping the first `&self` argument.
-                    let mut arguments = vec![];
-                    for (index, arg) in event.args.iter().enumerate() {
-                        match arg {
-                            FnArg::SelfRef(_) if index == 0 => {}
-                            FnArg::Captured(ref captured) if index > 0 => {
-                                arguments.push((captured.pat.clone(), captured.ty.clone()));
-                            }
-                            _ if index == 0 => {
-                                Err(Error::new(arg.span(), "expected `&self`"))?;
-                            }
-                            _ => {
-                                Err(Error::new(arg.span(), "expected `: type`"))?;
-                            }
-                        }
-                    }
-
-                    if event.attrs.len() > 1 {
-                        Err(Error::new(
-                            event.attribute_span().unwrap(),
-                            "Multiple attributes found. Only one allowed.",
-                        ))?;
-                    }
-
-                    let is_optional = if let Some(ref attr) = event.attrs.get(0) {
-                        if attr.path != Ident::new("optional", Span::call_site()).into() {
-                            Err(Error::new(
-                                attr.span(),
-                                "Only `#[optional]` attribute allowed here.",
-                            ))?;
-                        };
-                        true
-                    } else {
-                        false
-                    };
-
-                    let meta = EventMeta {
-                        ident: event.ident,
-                        arguments,
-                        return_type: event.return_type,
-                        is_optional,
-                    };
-                    event_metas.push(meta);
-                }
-
-                Ok(event_metas)
-            }).collect();
-
+            .map(EventMeta::parse_event_metas)
+            .collect();
         let mut event_metas: Vec<EventMeta> = event_metas?.into_iter().flatten().collect();
         event_metas.sort_by(|l, r| l.ident.cmp(&r.ident));
 
-        if event_metas.is_empty() {
-            Ok((None, rest))
-        } else {
-            let meta = EventsMeta {
-                ident: Ident::new(
-                    &format!("{}{}", component_ident, EVENT_SUFFIX),
-                    Span::call_site(),
-                ),
-                event_props_ident: Ident::new(
-                    &format!("{}{}", component_ident, EVENT_PROPS_SUFFIX),
-                    Span::call_site(),
-                ),
-                events: event_metas,
-            };
-            Ok((Some(meta), rest))
-        }
+        Ok(EventsMeta {
+            ident: Ident::new(
+                &format!("{}{}", component.ident, EVENT_SUFFIX),
+                Span::call_site(),
+            ),
+            event_props_ident: Ident::new(
+                &format!("{}{}", component.ident, EVENT_PROPS_SUFFIX),
+                Span::call_site(),
+            ),
+            component_ident: component.ident.clone(),
+            vis: component.vis.clone(),
+            events: event_metas,
+        })
+    }
+
+    fn partition_event_attributes(attrs: Vec<Attribute>) -> (Vec<Attribute>, Vec<Attribute>) {
+        let events = Ident::new("events", Span::call_site()).into();
+        attrs.into_iter().partition(|attr| attr.path == events)
     }
 
     fn expand_events_with<F>(&self, map_fn: F) -> Vec<TokenStream>
@@ -188,89 +69,80 @@ impl EventsMeta {
         self.events.iter().map(map_fn).collect()
     }
 
-    pub fn create_events_and_event_props_struct_and_macro(
-        &self,
-        component_ident: &Ident,
-        vis: &Visibility,
-    ) -> TokenStream {
-        let ident = &self.ident;
-        let event_props_ident = &self.event_props_ident;
-        let fields = self.expand_events_with(EventMeta::to_event_field);
-        let gen_fields = self.expand_events_with(EventMeta::to_event_prop_field);
-        let event_names = &self.expand_events_with(EventMeta::to_event_ident);
-        let event_conversion =
-            self.expand_events_with(EventMeta::impl_event_conversion_from_event_prop);
-        let event_wrappers = self.expand_events_with(|e| e.impl_event_wrapper(component_ident));
-
-        let mut next_event_names = event_names.clone();
-        let first = next_event_names.remove(0);
-        next_event_names.push(quote!(@finish));
-
-        let events_assignment = self.expand_events_with(EventMeta::to_event_assignment_for_macro);
-        let events_default_val =
-            self.expand_events_with(EventMeta::to_event_assignment_as_default_value_for_macro);
-
-        let macro_internal_ident =
-            &Ident::new(&format!("__new_{}_internal__", ident), Span::call_site());
-
-        let mut match_hands = vec![];
-        for ((cur, next), (assignment, default)) in event_names
-            .iter()
-            .zip(next_event_names.iter())
-            .zip(events_assignment.iter().zip(events_default_val.iter()))
-        {
-            match_hands.push(quote!{
-                (
-                    @#cur
-                    arguments = [{ $($args:tt)* }]
-                    tokens = [{ [#cur = $val:expr] $($rest:tt)* }]
-                ) => {
-                    #macro_internal_ident!(
-                        @#next
-                        arguments = [{ $($args)* #assignment }]
-                        tokens = [{ $($rest)* }]
-                    );
-                },
-                (
-                    @#cur
-                    arguments = [{ $($args:tt)* }]
-                    tokens = [{ $($rest:tt)* }]
-                ) => {
-                    #macro_internal_ident!(
-                        @#next
-                        arguments = [{ $($args)* #default }]
-                        tokens = [{ $($rest)* }]
-                    );
-                },
-            });
+    pub fn create_events_and_event_props_struct_and_macro(&self) -> TokenStream {
+        if self.events.is_empty() {
+            self.create_void_events_macro()
+        } else {
+            self._create_events_and_event_props_struct_and_macro()
         }
+    }
+
+    fn _create_events_and_event_props_struct_and_macro(&self) -> TokenStream {
+        let ident = &self.ident;
+        let vis = &self.vis;
+        let fields = self.expand_events_with(EventMeta::to_struct_field);
+        let event_names = &self.expand_events_with(EventMeta::to_event_name);
+
+        let event_props_struct = self.create_event_props_struct(event_names);
+        let events_macro = self.create_events_macro(event_names);
 
         quote! {
             #vis struct #ident {
                 #(#fields),*
             }
 
-            #vis struct #event_props_ident<RCTX: Render> {
-                #(#gen_fields),*
-            }
+            #event_props_struct
 
-            impl<RCTX: Render> ruukh::component::FromEventProps<RCTX> for #ident {
-                type From = #event_props_ident<RCTX>;
+            #events_macro
+        }
+    }
 
-                fn from(
-                    __rctx_events__: Self::From,
-                    __render_ctx__: std::rc::Rc<std::cell::RefCell<RCTX>>
-                ) -> Self {
-                    #(#event_conversion)*
+    fn create_events_macro(&self, event_names: &[TokenStream]) -> TokenStream {
+        let vis = &self.vis;
+        let ident = &self.ident;
+        let event_props_ident = &self.event_props_ident;
+        let component_ident = &self.component_ident;
+        let macro_internal_ident = self.internal_macro_ident();
 
-                    #ident {
-                        #(#event_names),*
-                    }
+        let mut next_event_names = event_names.to_owned();
+        let first = next_event_names.remove(0);
+        next_event_names.push(quote!(@finish));
+        let events_assignment = self.expand_events_with(EventMeta::to_event_assignment_for_macro);
+        let events_default_val =
+            self.expand_events_with(EventMeta::to_event_assignment_as_default_value_for_macro);
+
+        let match_hands = event_names
+            .iter()
+            .zip(next_event_names.iter())
+            .zip(events_assignment.iter().zip(events_default_val.iter()))
+            .map(|((cur, next), (assignment, default))| {
+                quote!{
+                    (
+                        @#cur
+                        arguments = [{ $($args:tt)* }]
+                        tokens = [{ [#cur = $val:expr] $($rest:tt)* }]
+                    ) => {
+                        #macro_internal_ident!(
+                            @#next
+                            arguments = [{ $($args)* #assignment }]
+                            tokens = [{ $($rest)* }]
+                        );
+                    },
+                    (
+                        @#cur
+                        arguments = [{ $($args:tt)* }]
+                        tokens = [{ $($rest:tt)* }]
+                    ) => {
+                        #macro_internal_ident!(
+                            @#next
+                            arguments = [{ $($args)* #default }]
+                            tokens = [{ $($rest)* }]
+                        );
+                    },
                 }
-            }
+            });
 
-            #(#event_wrappers)*
-
+        quote! {
             macro #macro_internal_ident {
                 #(#match_hands)*
                 (
@@ -301,15 +173,46 @@ impl EventsMeta {
         }
     }
 
-    pub fn create_void_events_macro(comp_ident: &Ident, vis: &Visibility) -> TokenStream {
-        let event_ident = Ident::new(
-            &format!("{}{}", comp_ident, EVENT_SUFFIX),
-            Span::call_site(),
-        );
-        let internal_macro_ident = Ident::new(
-            &format!("__new_{}_internal__", event_ident),
-            Span::call_site(),
-        );
+    fn create_event_props_struct(&self, event_names: &[TokenStream]) -> TokenStream {
+        let vis = &self.vis;
+        let ident = &self.ident;
+        let event_props_ident = &self.event_props_ident;
+        let gen_fields = self.expand_events_with(EventMeta::to_event_prop_field);
+        let event_conversion =
+            self.expand_events_with(EventMeta::impl_event_conversion_from_event_prop);
+        let event_wrappers =
+            self.expand_events_with(|e| e.impl_event_wrapper(&self.component_ident));
+
+        quote! {
+            #vis struct #event_props_ident<RCTX: Render> {
+                #(#gen_fields),*
+            }
+
+            impl<RCTX: Render> ruukh::component::FromEventProps<RCTX> for #ident {
+                type From = #event_props_ident<RCTX>;
+
+                fn from(
+                    __rctx_events__: Self::From,
+                    __render_ctx__: std::rc::Rc<std::cell::RefCell<RCTX>>
+                ) -> Self {
+                    #(#event_conversion)*
+
+                    #ident {
+                        #(#event_names),*
+                    }
+                }
+            }
+
+            #(#event_wrappers)*
+        }
+    }
+
+    fn create_void_events_macro(&self) -> TokenStream {
+        let ident = &self.ident;
+        let comp_ident = &self.component_ident;
+        let vis = &self.vis;
+        let internal_macro_ident = self.internal_macro_ident();
+
         quote! {
             macro #internal_macro_ident {
                 (
@@ -325,12 +228,19 @@ impl EventsMeta {
                 }
             }
 
-            #vis macro #event_ident($($key:ident: $val:expr),*) {
+            #vis macro #ident($($key:ident: $val:expr),*) {
                 #internal_macro_ident!(
                     tokens = [{ $([$key = $val])* }]
                 );
             }
         }
+    }
+
+    fn internal_macro_ident(&self) -> Ident {
+        Ident::new(
+            &format!("__new_{}_internal__", self.ident),
+            Span::call_site(),
+        )
     }
 }
 
@@ -347,6 +257,59 @@ pub struct EventMeta {
 }
 
 impl EventMeta {
+    fn parse_event_metas(attr: Attribute) -> ParseResult<Vec<EventMeta>> {
+        let parsed: EventsSyntax = syn::parse2(attr.tts)?;
+        parsed
+            .events
+            .into_iter()
+            .map(Self::parse_each_event_meta)
+            .collect()
+    }
+
+    fn parse_each_event_meta(event: EventSyntax) -> ParseResult<EventMeta> {
+        let arguments: ParseResult<Vec<_>> = event
+            .args
+            .into_iter()
+            .enumerate()
+            .skip_while(Self::is_first_arg_self_ref)
+            .map(Self::parse_event_argument)
+            .collect();
+
+        let is_optional = if let Some(ref attr) = event.attr {
+            if attr.path != Ident::new("optional", Span::call_site()).into() {
+                Err(Error::new(
+                    attr.span(),
+                    "Only `#[optional]` attribute allowed here.",
+                ))?;
+            };
+            true
+        } else {
+            false
+        };
+
+        Ok(EventMeta {
+            ident: event.ident,
+            arguments: arguments?,
+            return_type: event.return_type,
+            is_optional,
+        })
+    }
+
+    fn is_first_arg_self_ref((index, arg): &(usize, FnArg)) -> bool {
+        match arg {
+            FnArg::SelfRef(_) if *index == 0 => true,
+            _ => false,
+        }
+    }
+
+    fn parse_event_argument((index, arg): (usize, FnArg)) -> ParseResult<(Pat, Type)> {
+        match arg {
+            FnArg::Captured(ref captured) => Ok((captured.pat.clone(), captured.ty.clone())),
+            _ if index == 0 => Err(Error::new(arg.span(), "expected `&self`")),
+            _ => Err(Error::new(arg.span(), "expected `: type`")),
+        }
+    }
+
     fn arg_types(&self) -> Vec<TokenStream> {
         self.arguments.iter().map(|(_, ty)| quote!(#ty)).collect()
     }
@@ -379,14 +342,14 @@ impl EventMeta {
         }
     }
 
-    fn to_event_ident(&self) -> TokenStream {
+    fn to_event_name(&self) -> TokenStream {
         let ident = &self.ident;
         quote! {
             #ident
         }
     }
 
-    fn to_event_field(&self) -> TokenStream {
+    fn to_struct_field(&self) -> TokenStream {
         let ident = &self.ident;
 
         let fn_type = if self.is_optional {

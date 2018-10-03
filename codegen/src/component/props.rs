@@ -1,40 +1,31 @@
-use super::fields::{is_state, ComponentField};
+use super::fields::ComponentField;
 use crate::suffix::PROPS_SUFFIX;
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{parse::Result as ParseResult, Field, Ident, Visibility};
+use syn::{Ident, ItemStruct, Visibility};
 
 /// Stores the list of prop fields.
 pub struct PropsMeta {
     /// Ident of props struct.
     pub ident: Ident,
+    /// Ident of the component.
+    pub component_ident: Ident,
+    /// Visiblilty of the component.
+    pub vis: Visibility,
     /// List of prop fields.
     pub fields: Vec<ComponentField>,
 }
 
 impl PropsMeta {
-    pub fn take_prop_fields(
-        component_ident: &Ident,
-        fields: Vec<Field>,
-    ) -> ParseResult<(Option<PropsMeta>, Vec<Field>)> {
-        let (rest, prop_fields): (Vec<_>, Vec<_>) = fields.into_iter().partition(is_state);
-        let prop_fields: ParseResult<Vec<_>> = prop_fields
-            .into_iter()
-            .map(ComponentField::parse_prop_field)
-            .collect();
-        let mut prop_fields = prop_fields?;
-        prop_fields.sort_by(|l, r| l.ident.cmp(&r.ident));
-        if prop_fields.is_empty() {
-            Ok((None, rest))
-        } else {
-            let meta = PropsMeta {
-                ident: Ident::new(
-                    &format!("{}{}", component_ident, PROPS_SUFFIX),
-                    Span::call_site(),
-                ),
-                fields: prop_fields,
-            };
-            Ok((Some(meta), rest))
+    pub fn parse(component: &ItemStruct, fields: Vec<ComponentField>) -> PropsMeta {
+        PropsMeta {
+            ident: Ident::new(
+                &format!("{}{}", component.ident, PROPS_SUFFIX),
+                Span::call_site(),
+            ),
+            component_ident: component.ident.clone(),
+            vis: component.vis.clone(),
+            fields,
         }
     }
 
@@ -45,58 +36,86 @@ impl PropsMeta {
         self.fields.iter().map(map_fn).collect()
     }
 
-    pub fn create_props_struct_and_macro(
-        &self,
-        comp_ident: &Ident,
-        vis: &Visibility,
-    ) -> TokenStream {
+    pub fn to_struct_fields(&self) -> Vec<TokenStream> {
+        self.fields
+            .iter()
+            .map(ComponentField::to_struct_field)
+            .collect()
+    }
+
+    pub fn to_field_idents(&self) -> Vec<TokenStream> {
+        self.fields.iter().map(ComponentField::to_ident).collect()
+    }
+
+    pub fn create_props_struct_and_macro(&self) -> TokenStream {
+        if self.fields.is_empty() {
+            self.create_void_props_macro()
+        } else {
+            self._create_props_struct_and_macro()
+        }
+    }
+
+    fn _create_props_struct_and_macro(&self) -> TokenStream {
         let ident = &self.ident;
+        let vis = &self.vis;
         let fields = self.expand_fields_with(ComponentField::to_struct_field);
+
+        let props_macro = self.create_props_macro();
+
+        quote! {
+            #vis struct #ident {
+                #(#fields),*
+            }
+
+            #props_macro
+        }
+    }
+
+    fn create_props_macro(&self) -> TokenStream {
+        let ident = &self.ident;
+        let vis = &self.vis;
+        let comp_ident = &self.component_ident;
+
         let field_idents = self.expand_fields_with(ComponentField::to_ident);
         let field_default_vals =
             self.expand_fields_with(ComponentField::to_default_argument_for_macro);
         let mut next_idents = field_idents.clone();
         let first = next_idents.remove(0);
         next_idents.push(quote!(@finish));
-        let internal_macro_ident =
-            &Ident::new(&format!("__new_{}_internal__", ident), Span::call_site());
+        let internal_macro_ident = self.internal_macro_ident();
 
-        let mut match_hands = vec![];
-        for ((cur, next), default) in field_idents
+        let match_hands = field_idents
             .iter()
             .zip(next_idents.iter())
             .zip(field_default_vals.iter())
-        {
-            match_hands.push(quote!{
-                (
-                    @#cur
-                    arguments = [{ $($args:tt)* }]
-                    tokens = [{ [#cur = $val:expr] $($rest:tt)* }]
-                ) => {
-                    #internal_macro_ident!(
-                        @#next
-                        arguments = [{ $($args)* [#cur = $val] }]
-                        tokens = [{ $($rest)* }]
-                    );
-                },
-                (
-                    @#cur
-                    arguments = [{ $($args:tt)* }]
-                    tokens = [{ $($rest:tt)* }]
-                ) => {
-                    #internal_macro_ident!(
-                        @#next
-                        arguments = [{ $($args)* #default }]
-                        tokens = [{ $($rest)* }]
-                    );
-                },
+            .map(|((cur, next), default)| {
+                quote!{
+                    (
+                        @#cur
+                        arguments = [{ $($args:tt)* }]
+                        tokens = [{ [#cur = $val:expr] $($rest:tt)* }]
+                    ) => {
+                        #internal_macro_ident!(
+                            @#next
+                            arguments = [{ $($args)* [#cur = $val] }]
+                            tokens = [{ $($rest)* }]
+                        );
+                    },
+                    (
+                        @#cur
+                        arguments = [{ $($args:tt)* }]
+                        tokens = [{ $($rest:tt)* }]
+                    ) => {
+                        #internal_macro_ident!(
+                            @#next
+                            arguments = [{ $($args)* #default }]
+                            tokens = [{ $($rest)* }]
+                        );
+                    },
+                }
             });
-        }
-        quote! {
-            #vis struct #ident {
-                #(#fields),*
-            }
 
+        quote! {
             macro #internal_macro_ident {
                 #(#match_hands)*
                 (
@@ -127,15 +146,11 @@ impl PropsMeta {
         }
     }
 
-    pub fn create_void_props_macro(comp_ident: &Ident, vis: &Visibility) -> TokenStream {
-        let prop_ident = Ident::new(
-            &format!("{}{}", comp_ident, PROPS_SUFFIX),
-            Span::call_site(),
-        );
-        let internal_macro_ident = Ident::new(
-            &format!("__new_{}_internal__", prop_ident),
-            Span::call_site(),
-        );
+    fn create_void_props_macro(&self) -> TokenStream {
+        let ident = &self.ident;
+        let vis = &self.vis;
+        let comp_ident = &self.component_ident;
+        let internal_macro_ident = self.internal_macro_ident();
         quote! {
             macro #internal_macro_ident {
                 (
@@ -151,11 +166,18 @@ impl PropsMeta {
                 }
             }
 
-            #vis macro #prop_ident($($key:ident: $val:expr),*) {
+            #vis macro #ident($($key:ident: $val:expr),*) {
                 #internal_macro_ident!(
                     tokens = [{ $([$key = $val])* }]
                 );
             }
         }
+    }
+
+    fn internal_macro_ident(&self) -> Ident {
+        Ident::new(
+            &format!("__new_{}_internal__", self.ident),
+            Span::call_site(),
+        )
     }
 }

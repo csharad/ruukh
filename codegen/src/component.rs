@@ -1,10 +1,10 @@
 use self::{events::EventsMeta, fields::ComponentField, props::PropsMeta, state::StateMeta};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
+use std::mem;
 use syn::{
     parse::{Error, Result as ParseResult},
-    spanned::Spanned,
-    Attribute, Field, Fields, Ident, ItemStruct, Visibility,
+    Attribute, Ident, ItemStruct, Visibility,
 };
 
 mod events;
@@ -22,17 +22,17 @@ pub struct ComponentMeta {
     /// Ident of component.
     ident: Ident,
     /// Props metadata if any prop fields.
-    props_meta: Option<PropsMeta>,
+    props_meta: PropsMeta,
     /// State metadata if any state fields.
-    state_meta: Option<StateMeta>,
+    state_meta: StateMeta,
     /// Events metadata if any events declaration.
-    events_meta: Option<EventsMeta>,
+    events_meta: EventsMeta,
 }
 
 impl ComponentMeta {
-    pub fn parse(item: ItemStruct) -> ParseResult<ComponentMeta> {
+    pub fn parse(mut item: ItemStruct) -> ParseResult<ComponentMeta> {
         // Remove `#[component]` attribute.
-        let attrs = Self::filter_out_component_attribute(item.attrs);
+        Self::filter_out_component_attribute(&mut item);
 
         if item.generics != Default::default() {
             return Err(Error::new(
@@ -41,32 +41,11 @@ impl ComponentMeta {
             ));
         }
 
-        // Cleave out the struct fields into state and props fields.
-        let (props_meta, state_meta) = match item.fields {
-            Fields::Named(fields) => {
-                let fields: Vec<_> = fields.named.into_iter().collect();
-                verify_valid_fields(&fields)?;
-
-                let (props_meta, fields) = PropsMeta::take_prop_fields(&item.ident, fields)?;
-                let (state_meta, fields) = StateMeta::take_state_fields(&item.ident, fields)?;
-                assert!(
-                    fields.is_empty(),
-                    "There are no fields left other than prop and state fields."
-                );
-                (props_meta, state_meta)
-            }
-            Fields::Unnamed(_) => {
-                return Err(Error::new(
-                    item.ident.span(),
-                    "Only unit and named field structs can be components.",
-                ))
-            }
-            Fields::Unit => (None, None),
-        };
-        let (events_meta, attrs) = EventsMeta::take_events_attributes(&item.ident, attrs)?;
+        let (props_meta, state_meta) = ComponentField::parse_into_prop_and_state_meta(&mut item)?;
+        let events_meta = EventsMeta::parse(&mut item)?;
 
         Ok(ComponentMeta {
-            attrs,
+            attrs: item.attrs,
             vis: item.vis,
             ident: item.ident,
             props_meta,
@@ -75,28 +54,25 @@ impl ComponentMeta {
         })
     }
 
-    fn filter_out_component_attribute(attrs: Vec<Attribute>) -> Vec<Attribute> {
+    fn filter_out_component_attribute(item: &mut ItemStruct) {
+        let mut attrs = vec![];
+        mem::swap(&mut attrs, &mut item.attrs);
         let component = Ident::new("component", Span::call_site()).into();
-        attrs
+        let attrs: Vec<_> = attrs
             .into_iter()
             .filter(|attr| attr.path != component)
-            .collect()
+            .collect();
+        item.attrs = attrs;
     }
 
     pub fn expand(&self) -> TokenStream {
         let component_struct = self.create_component_struct();
         let component_impl = self.impl_component_trait_on_component_struct();
-        let state_struct = self.state_meta.as_ref().map(StateMeta::create_state_struct);
-        let props_struct = self
-            .props_meta
-            .as_ref()
-            .map(|m| m.create_props_struct_and_macro(&self.ident, &self.vis))
-            .unwrap_or_else(|| PropsMeta::create_void_props_macro(&self.ident, &self.vis));
+        let state_struct = self.state_meta.create_state_struct();
+        let props_struct = self.props_meta.create_props_struct_and_macro();
         let events_structs = self
             .events_meta
-            .as_ref()
-            .map(|m| m.create_events_and_event_props_struct_and_macro(&self.ident, &self.vis))
-            .unwrap_or_else(|| EventsMeta::create_void_events_macro(&self.ident, &self.vis));
+            .create_events_and_event_props_struct_and_macro();
 
         quote! {
             #component_struct
@@ -116,22 +92,17 @@ impl ComponentMeta {
         let ident = &self.ident;
         let vis = &self.vis;
 
-        if self.props_meta.is_none() && self.state_meta.is_none() && self.events_meta.is_none() {
+        if self.props_meta.fields.is_empty()
+            && self.state_meta.fields.is_empty()
+            && self.events_meta.events.is_empty()
+        {
             quote! {
                 #(#attrs)*
                 #vis struct #ident;
             }
         } else {
-            let state_fields = self
-                .state_meta
-                .as_ref()
-                .map(|s| s.expand_fields_with(ComponentField::to_struct_field))
-                .unwrap_or_default();
-            let props_fields = self
-                .props_meta
-                .as_ref()
-                .map(|p| p.expand_fields_with(ComponentField::to_struct_field))
-                .unwrap_or_default();
+            let state_fields = self.state_meta.to_struct_fields();
+            let props_fields = self.props_meta.to_struct_fields();
             let status_field = self.create_status_field();
             let events_field = self.create_events_field();
 
@@ -148,15 +119,10 @@ impl ComponentMeta {
     }
 
     fn create_status_field(&self) -> TokenStream {
-        if self.props_meta.is_none() && self.state_meta.is_none() {
+        if self.props_meta.fields.is_empty() && self.state_meta.fields.is_empty() {
             quote!()
         } else {
-            let ident = if let Some(ref state_meta) = self.state_meta {
-                let ident = &state_meta.ident;
-                quote! { #ident }
-            } else {
-                quote! { () }
-            };
+            let ident = &self.state_meta.ident;
             quote! {
                 __status__: std::rc::Rc<std::cell::RefCell<ruukh::component::Status<#ident>>>,
             }
@@ -164,47 +130,40 @@ impl ComponentMeta {
     }
 
     fn create_events_field(&self) -> TokenStream {
-        if self.events_meta.is_none() {
+        if self.events_meta.events.is_empty() {
             quote!()
         } else {
-            let ident = &self.events_meta.as_ref().unwrap().ident;
+            let ident = &self.events_meta.ident;
             quote! {
                 __events__: #ident,
             }
         }
     }
 
-    fn expand_state_field_idents(&self) -> Vec<TokenStream> {
-        self.state_meta
-            .as_ref()
-            .map(|s| s.expand_fields_with(ComponentField::to_ident))
-            .unwrap_or_default()
-    }
-
     fn get_props_type(&self) -> TokenStream {
-        if let Some(ref props_meta) = self.props_meta {
-            let ident = &props_meta.ident;
-            quote!(#ident)
-        } else {
+        if self.props_meta.fields.is_empty() {
             quote!(())
+        } else {
+            let ident = &self.props_meta.ident;
+            quote!(#ident)
         }
     }
 
     fn get_state_type(&self) -> TokenStream {
-        if let Some(ref state_meta) = self.state_meta {
-            let ident = &state_meta.ident;
-            quote!(#ident)
-        } else {
+        if self.state_meta.fields.is_empty() {
             quote!(())
+        } else {
+            let ident = &self.state_meta.ident;
+            quote!(#ident)
         }
     }
 
     fn get_events_type(&self) -> TokenStream {
-        if let Some(ref events_meta) = self.events_meta {
-            let ident = &events_meta.ident;
-            quote!(#ident)
-        } else {
+        if self.events_meta.events.is_empty() {
             quote!(())
+        } else {
+            let ident = &self.events_meta.ident;
+            quote!(#ident)
         }
     }
 
@@ -215,16 +174,8 @@ impl ComponentMeta {
         let events_type = &self.get_events_type();
         let state_clone = self.impl_state_clone_from_status();
         let event_assignment = self.impl_event_assignment();
-        let state_field_idents = &self
-            .state_meta
-            .as_ref()
-            .map(|m| m.fields.iter().map(|f| &f.ident).collect::<Vec<_>>())
-            .unwrap_or_default();
-        let props_field_idents = &self
-            .props_meta
-            .as_ref()
-            .map(|m| m.fields.iter().map(|f| &f.ident).collect::<Vec<_>>())
-            .unwrap_or_default();
+        let state_field_idents = &self.state_meta.to_field_idents();
+        let props_field_idents = &self.props_meta.to_field_idents();
         let props_field_idents2 = props_field_idents;
         let status_assignment = self.impl_status_assignment();
         let props_updation = self.impl_props_updation(props_field_idents);
@@ -287,9 +238,9 @@ impl ComponentMeta {
         }
     }
 
-    fn impl_fn_set_state_body(&self, idents: &[&Ident]) -> TokenStream {
+    fn impl_fn_set_state_body(&self, idents: &[TokenStream]) -> TokenStream {
         let idents2 = idents;
-        if self.state_meta.is_some() {
+        if !self.state_meta.fields.is_empty() {
             quote! {
                 let mut status = self.__status__.borrow_mut();
                 mutator(status.state_as_mut());
@@ -315,7 +266,7 @@ impl ComponentMeta {
     }
 
     fn impl_fn_take_props_dirty_body(&self) -> TokenStream {
-        if self.props_meta.is_some() {
+        if !self.props_meta.fields.is_empty() {
             quote! {
                 self.__status__.borrow_mut().take_props_dirty()
             }
@@ -325,7 +276,7 @@ impl ComponentMeta {
     }
 
     fn impl_fn_take_state_dirty_body(&self) -> TokenStream {
-        if self.state_meta.is_some() {
+        if !self.state_meta.fields.is_empty() {
             quote! {
                 self.__status__.borrow_mut().take_state_dirty()
             }
@@ -334,12 +285,12 @@ impl ComponentMeta {
         }
     }
 
-    fn impl_fn_refresh_state_body(&self, idents: &[&Ident]) -> TokenStream {
+    fn impl_fn_refresh_state_body(&self, idents: &[TokenStream]) -> TokenStream {
         let idents2 = idents;
         let idents3 = idents;
         let idents4 = idents;
 
-        if self.state_meta.is_some() {
+        if !self.state_meta.fields.is_empty() {
             quote! {
                 let status = self.__status__.borrow();
                 let state = status.state_as_ref();
@@ -354,12 +305,12 @@ impl ComponentMeta {
         }
     }
 
-    fn impl_props_updation(&self, idents: &[&Ident]) -> TokenStream {
+    fn impl_props_updation(&self, idents: &[TokenStream]) -> TokenStream {
         let idents2 = idents;
         let idents3 = idents;
         let idents4 = idents;
 
-        if self.props_meta.is_some() {
+        if !self.props_meta.fields.is_empty() {
             quote! {
                 use std::mem;
 
@@ -380,7 +331,7 @@ impl ComponentMeta {
     }
 
     fn impl_return_block_after_updation(&self) -> TokenStream {
-        if self.props_meta.is_some() {
+        if !self.props_meta.fields.is_empty() {
             quote! {
                 if updated {
                     self.__status__.borrow_mut().mark_props_dirty();
@@ -395,7 +346,7 @@ impl ComponentMeta {
     }
 
     fn impl_events_updation(&self) -> TokenStream {
-        if self.events_meta.is_some() {
+        if !self.events_meta.events.is_empty() {
             quote! {
                 // The events need to be updated regardless, there is no checking them.
                 self.__events__ = __events__;
@@ -406,10 +357,10 @@ impl ComponentMeta {
     }
 
     fn impl_state_clone_from_status(&self) -> TokenStream {
-        if self.state_meta.is_none() {
+        if self.state_meta.fields.is_empty() {
             quote!()
         } else {
-            let state_field_idents = &self.expand_state_field_idents();
+            let state_field_idents = &self.state_meta.to_field_idents();
 
             if state_field_idents.len() == 1 {
                 quote! {
@@ -430,7 +381,7 @@ impl ComponentMeta {
     }
 
     fn impl_status_assignment(&self) -> TokenStream {
-        if self.props_meta.is_none() && self.state_meta.is_none() {
+        if self.props_meta.fields.is_empty() && self.state_meta.fields.is_empty() {
             quote!()
         } else {
             quote!(__status__: std::rc::Rc::new(std::cell::RefCell::new(__status__)),)
@@ -438,7 +389,7 @@ impl ComponentMeta {
     }
 
     fn impl_event_assignment(&self) -> TokenStream {
-        if self.events_meta.is_some() {
+        if !self.events_meta.events.is_empty() {
             quote! {
                 __events__,
             }
@@ -446,42 +397,4 @@ impl ComponentMeta {
             quote!()
         }
     }
-}
-
-fn verify_valid_fields(fields: &[Field]) -> ParseResult<()> {
-    let prop_kind = Ident::new("prop", Span::call_site()).into();
-    let state_kind = Ident::new("state", Span::call_site()).into();
-
-    for field in fields.iter() {
-        let prop_attrs = field
-            .attrs
-            .iter()
-            .filter(|attr| attr.path == prop_kind)
-            .collect::<Vec<_>>();
-        let state_attrs = field
-            .attrs
-            .iter()
-            .filter(|attr| attr.path == state_kind)
-            .collect::<Vec<_>>();
-
-        if !state_attrs.is_empty() && !prop_attrs.is_empty() {
-            Err(Error::new(
-                field.ident.span(),
-                "Cannot be both `#[prop]` and `#[state]` at once.",
-            ))?;
-        }
-        if prop_attrs.len() > 1 {
-            Err(Error::new(
-                field.ident.span(),
-                "Cannot have multiple `#[prop]` attributes.",
-            ))?;
-        }
-        if state_attrs.len() > 1 {
-            Err(Error::new(
-                field.ident.span(),
-                "Cannot have multiple `#[state]` attributes.",
-            ))?;
-        }
-    }
-    Ok(())
 }
