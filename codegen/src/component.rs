@@ -245,7 +245,11 @@ impl ComponentMeta {
 
     fn impl_fn_set_state_body(&self, idents: &[TokenStream]) -> TokenStream {
         let idents2 = idents;
-        if !self.state_meta.fields.is_empty() {
+        if self.state_meta.fields.is_empty() {
+            quote! {
+                mutator(&mut ());
+            }
+        } else {
             quote! {
                 let mut status = self.__status__.borrow_mut();
                 mutator(status.state_as_mut());
@@ -263,30 +267,26 @@ impl ComponentMeta {
                     status.do_react();
                 }
             }
-        } else {
-            quote! {
-                mutator(&mut ());
-            }
         }
     }
 
     fn impl_fn_take_props_dirty_body(&self) -> TokenStream {
-        if !self.props_meta.fields.is_empty() {
+        if self.props_meta.fields.is_empty() {
+            quote! { false }
+        } else {
             quote! {
                 self.__status__.borrow_mut().take_props_dirty()
             }
-        } else {
-            quote! { false }
         }
     }
 
     fn impl_fn_take_state_dirty_body(&self) -> TokenStream {
-        if !self.state_meta.fields.is_empty() {
+        if self.state_meta.fields.is_empty() {
+            quote! { false }
+        } else {
             quote! {
                 self.__status__.borrow_mut().take_state_dirty()
             }
-        } else {
-            quote! { false }
         }
     }
 
@@ -296,6 +296,8 @@ impl ComponentMeta {
         let idents4 = idents;
 
         if !self.state_meta.fields.is_empty() {
+            quote!()
+        } else {
             quote! {
                 let status = self.__status__.borrow();
                 let state = status.state_as_ref();
@@ -305,8 +307,6 @@ impl ComponentMeta {
                     }
                 )*
             }
-        } else {
-            quote!()
         }
     }
 
@@ -315,7 +315,9 @@ impl ComponentMeta {
         let idents3 = idents;
         let idents4 = idents;
 
-        if !self.props_meta.fields.is_empty() {
+        if self.props_meta.fields.is_empty() {
+            quote!()
+        } else {
             quote! {
                 use std::mem;
 
@@ -330,13 +332,13 @@ impl ComponentMeta {
                     }
                 )*
             }
-        } else {
-            quote!()
         }
     }
 
     fn impl_return_block_after_updation(&self) -> TokenStream {
-        if !self.props_meta.fields.is_empty() {
+        if self.props_meta.fields.is_empty() {
+            quote! { None }
+        } else {
             quote! {
                 if updated {
                     self.__status__.borrow_mut().mark_props_dirty();
@@ -345,19 +347,17 @@ impl ComponentMeta {
                     None
                 }
             }
-        } else {
-            quote! { None }
         }
     }
 
     fn impl_events_updation(&self) -> TokenStream {
-        if !self.events_meta.events.is_empty() {
+        if self.events_meta.events.is_empty() {
+            quote!()
+        } else {
             quote! {
                 // The events need to be updated regardless, there is no checking them.
                 self.__events__ = __events__;
             }
-        } else {
-            quote!()
         }
     }
 
@@ -394,12 +394,12 @@ impl ComponentMeta {
     }
 
     fn impl_event_assignment(&self) -> TokenStream {
-        if !self.events_meta.events.is_empty() {
+        if self.events_meta.events.is_empty() {
+            quote!()
+        } else {
             quote! {
                 __events__,
             }
-        } else {
-            quote!()
         }
     }
 }
