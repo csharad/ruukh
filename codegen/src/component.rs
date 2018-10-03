@@ -295,7 +295,7 @@ impl ComponentMeta {
         let idents3 = idents;
         let idents4 = idents;
 
-        if !self.state_meta.fields.is_empty() {
+        if self.state_meta.fields.is_empty() {
             quote!()
         } else {
             quote! {
