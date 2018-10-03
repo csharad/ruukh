@@ -1,4 +1,4 @@
-use self::parser::{EventSyntax, EventsSyntax};
+use self::parser::{EventDeclaration, EventDeclarations};
 use crate::suffix::{EVENT_PROPS_SUFFIX, EVENT_SUFFIX};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
@@ -258,7 +258,7 @@ pub struct EventMeta {
 
 impl EventMeta {
     fn parse_event_metas(attr: Attribute) -> ParseResult<Vec<EventMeta>> {
-        let parsed: EventsSyntax = syn::parse2(attr.tts)?;
+        let parsed: EventDeclarations = syn::parse2(attr.tts)?;
         parsed
             .events
             .into_iter()
@@ -266,7 +266,7 @@ impl EventMeta {
             .collect()
     }
 
-    fn parse_each_event_meta(event: EventSyntax) -> ParseResult<EventMeta> {
+    fn parse_each_event_meta(event: EventDeclaration) -> ParseResult<EventMeta> {
         let arguments: ParseResult<Vec<_>> = event
             .args
             .into_iter()

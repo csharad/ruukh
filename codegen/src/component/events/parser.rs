@@ -5,29 +5,29 @@ use syn::{
     Attribute, FnArg, Ident, ReturnType, Token,
 };
 
-/// The syntax for the `#[events]` attribute TokenStream.
+/// The argument syntax for the `#[events]` attribute.
 ///
 /// i.e. Parses ```ignore,compile_fail
-/// #[events(
+/// (
 ///     fn event_name(&self, arg: type, ...) -> type;
 ///     fn event_name(&self, arg: type, ...) -> type;
 ///     fn event_name(&self, arg: type, ...) -> type;
-/// )]```
-pub struct EventsSyntax {
-    pub events: Vec<EventSyntax>,
+/// )```
+pub struct EventDeclarations {
+    pub events: Vec<EventDeclaration>,
 }
 
-impl Parse for EventsSyntax {
+impl Parse for EventDeclarations {
     fn parse(input: ParseStream<'_>) -> ParseResult<Self> {
         let content;
         parenthesized!(content in input);
 
         let mut events = vec![];
         while !content.is_empty() {
-            let event: EventSyntax = content.parse()?;
+            let event: EventDeclaration = content.parse()?;
             events.push(event);
         }
-        Ok(EventsSyntax { events })
+        Ok(EventDeclarations { events })
     }
 }
 
@@ -37,14 +37,14 @@ impl Parse for EventsSyntax {
 /// #[optional]
 /// fn event_name(&self, arg: type, ...) -> type;
 /// ```
-pub struct EventSyntax {
+pub struct EventDeclaration {
     pub attr: Option<Attribute>,
     pub ident: Ident,
     pub args: Vec<FnArg>,
     pub return_type: ReturnType,
 }
 
-impl Parse for EventSyntax {
+impl Parse for EventDeclaration {
     fn parse(input: ParseStream<'_>) -> ParseResult<Self> {
         let mut attrs = input.call(Attribute::parse_outer)?;
         if attrs.len() > 1 {
@@ -72,7 +72,7 @@ impl Parse for EventSyntax {
             Err(input.error("expected `;`"))?;
         }
 
-        Ok(EventSyntax {
+        Ok(EventDeclaration {
             attr: if attrs.is_empty() {
                 None
             } else {
