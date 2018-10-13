@@ -51,7 +51,7 @@ impl StateMeta {
                 self.expand_fields_with(ComponentField::to_field_assignment_as_default);
 
             Some(quote! {
-                struct #ident {
+                pub struct #ident {
                     #(#fields),*
                 }
 

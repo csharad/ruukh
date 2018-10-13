@@ -194,7 +194,7 @@ impl ComponentMeta {
 
             Some(quote! {
                 #[derive(Clone)]
-                struct #ident(std::rc::Rc<std::cell::RefCell<ruukh::component::Status<#state_ty>>>);
+                pub struct #ident(std::rc::Rc<std::cell::RefCell<ruukh::component::Status<#state_ty>>>);
 
                 #status_set_state
             })
