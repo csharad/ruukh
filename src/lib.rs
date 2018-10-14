@@ -196,7 +196,7 @@ fn app_message_channel() -> (MessageReceiver, MessageSender) {
 
 /// The receiving end of the message port which notifies the app for any state
 /// changes.
-pub struct MessageReceiver {
+struct MessageReceiver {
     port: MessagePort,
     is_queued: Shared<bool>,
 }
