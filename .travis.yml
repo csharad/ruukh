@@ -54,4 +54,4 @@ jobs:
 stage:
   - test
   - name: docs
-    if: branch = master AND type != pull_request
+    if: branch = master AND head_repo IS blank # produce docs if and only if master changes.
