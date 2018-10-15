@@ -281,19 +281,19 @@ where
     }
 }
 
-impl<RCTX: Render> From<VComponent<RCTX>> for VNode<RCTX> {
+impl<RCTX> From<VComponent<RCTX>> for VNode<RCTX> {
     fn from(comp: VComponent<RCTX>) -> VNode<RCTX> {
         VNode::Component(comp)
     }
 }
 
-impl<RCTX: Render> Display for VComponent<RCTX> {
+impl<RCTX> Display for VComponent<RCTX> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<COMP: Render, RCTX: Render> Display for ComponentWrapper<COMP, RCTX>
+impl<COMP: Render, RCTX> Display for ComponentWrapper<COMP, RCTX>
 where
     COMP::Events: FromEventProps<RCTX>,
 {

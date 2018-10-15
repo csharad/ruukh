@@ -118,7 +118,7 @@ impl Attribute {
     }
 }
 
-impl<RCTX: Render> EventListener<RCTX> {
+impl<RCTX> EventListener<RCTX> {
     /// Create a EventListener.
     pub fn new(type_: &'static str, listener: Box<dyn Fn(&RCTX, Event)>) -> EventListener<RCTX> {
         EventListener {
@@ -129,7 +129,7 @@ impl<RCTX: Render> EventListener<RCTX> {
     }
 }
 
-impl<RCTX: Render> From<VElement<RCTX>> for VNode<RCTX> {
+impl<RCTX> From<VElement<RCTX>> for VNode<RCTX> {
     fn from(el: VElement<RCTX>) -> VNode<RCTX> {
         VNode::Element(el)
     }
@@ -140,7 +140,7 @@ const VOID_TAGS: [&str; 14] = [
     "track", "wbr",
 ];
 
-impl<RCTX: Render> Display for VElement<RCTX> {
+impl<RCTX> Display for VElement<RCTX> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if VOID_TAGS.contains(&self.tag) {
             write!(f, "<{}{}>", self.tag, self.attributes)?;

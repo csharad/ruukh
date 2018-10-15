@@ -42,7 +42,7 @@ impl<RCTX> From<IndexMap<Key, VNode<RCTX>, FnvBuildHasher>> for VList<RCTX> {
     }
 }
 
-impl<RCTX: Render> Display for VList<RCTX> {
+impl<RCTX> Display for VList<RCTX> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for (_, vnode) in self.0.iter() {
             write!(f, "{}", vnode)?;

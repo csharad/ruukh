@@ -49,7 +49,7 @@ impl<RCTX> VNode<RCTX> {
     }
 }
 
-impl<RCTX: Render> Display for VNode<RCTX> {
+impl<RCTX> Display for VNode<RCTX> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             VNode::Text(inner) => write!(f, "{}", inner),
