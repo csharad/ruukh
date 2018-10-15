@@ -15,7 +15,7 @@ Till version `0.1.0`, each patch version may be breaking change.
 - 
 
 ### Removed
-- 
+- Remove `Display` impl from VNode and its constituents.
 
 ### Fixed
 - Component props were wrongly identified to be unavailable when defined non-alphabetical order [#28](https://github.com/csharad/ruukh/issues/28).

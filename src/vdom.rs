@@ -12,10 +12,7 @@ use crate::{
     MessageSender,
     Shared
 };
-use std::{
-    borrow::Cow, 
-    fmt::{self, Display, Formatter}
-};
+use std::borrow::Cow;
 use wasm_bindgen::prelude::JsValue;
 use web_sys::Node;
 
@@ -45,18 +42,6 @@ impl<RCTX> VNode<RCTX> {
         match self {
             VNode::None => true,
             _ => false
-        }
-    }
-}
-
-impl<RCTX> Display for VNode<RCTX> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            VNode::Text(inner) => write!(f, "{}", inner),
-            VNode::Element(inner) => write!(f, "{}", inner),
-            VNode::List(inner) => write!(f, "{}", inner),
-            VNode::Component(inner) => write!(f, "{}", inner),
-            VNode::None => Ok(())
         }
     }
 }
@@ -251,16 +236,9 @@ impl From<String> for Key {
 
 #[cfg(test)]
 mod test {
-    use crate::vdom::{vtext::VText, VNode};
     use web_sys::{window, Element};
 
     pub fn container() -> Element {
         window().unwrap().document().unwrap().create_element("div").unwrap()
-    }
-
-    #[test]
-    fn should_display_vnode() {
-        let node = VNode::<()>::from(VText::text("Hello World!"));
-        assert_eq!(format!("{}", node), "Hello World!");
     }
 }

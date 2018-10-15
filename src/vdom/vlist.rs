@@ -8,10 +8,7 @@ use crate::{
 };
 use fnv::FnvBuildHasher;
 use indexmap::IndexMap;
-use std::{
-    collections::HashSet,
-    fmt::{self, Display, Formatter},
-};
+use std::collections::HashSet;
 use wasm_bindgen::prelude::JsValue;
 use web_sys::Node;
 
@@ -39,15 +36,6 @@ impl<RCTX> From<Vec<VNode<RCTX>>> for VList<RCTX> {
 impl<RCTX> From<IndexMap<Key, VNode<RCTX>, FnvBuildHasher>> for VList<RCTX> {
     fn from(map: IndexMap<Key, VNode<RCTX>, FnvBuildHasher>) -> Self {
         VList(map)
-    }
-}
-
-impl<RCTX> Display for VList<RCTX> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for (_, vnode) in self.0.iter() {
-            write!(f, "{}", vnode)?;
-        }
-        Ok(())
     }
 }
 
@@ -150,15 +138,6 @@ pub mod test {
     };
     use wasm_bindgen_test::*;
 
-    #[test]
-    fn should_display_a_list_of_vnodes() {
-        let list = VList::<()>::from(vec![
-            VNode::from(VText::text("First of the node")),
-            VNode::from(VElement::childless("input", vec![], vec![])),
-        ]);
-        assert_eq!(format!("{}", list), "First of the node<input>");
-    }
-
     #[wasm_bindgen_test]
     fn should_patch_container_with_list_of_vnodes() {
         let mut list = VList::from(vec![
@@ -172,7 +151,8 @@ pub mod test {
             None,
             root_render_ctx(),
             crate::message_sender(),
-        ).expect("To patch div");
+        )
+        .expect("To patch div");
 
         assert_eq!(div.inner_html(), "Hello World!<div></div>");
     }
@@ -190,7 +170,8 @@ pub mod test {
             None,
             root_render_ctx(),
             crate::message_sender(),
-        ).expect("To patch div");
+        )
+        .expect("To patch div");
 
         assert_eq!(div.inner_html(), "Hello World!<div></div>");
 
@@ -206,7 +187,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(div.inner_html(), "<div></div>Hello World!How are you?");
     }

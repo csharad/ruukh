@@ -1,10 +1,7 @@
 //! Representation of text/comment in virtual dom tree.
 
 use crate::{component::Render, dom::DOMPatch, vdom::VNode, MessageSender, Shared};
-use std::{
-    fmt::{self, Display, Formatter},
-    marker::PhantomData,
-};
+use std::marker::PhantomData;
 use wasm_bindgen::prelude::JsValue;
 use web_sys::{window, Node};
 
@@ -68,16 +65,6 @@ impl<RCTX> VText<RCTX> {
 impl<RCTX> From<VText<RCTX>> for VNode<RCTX> {
     fn from(text: VText<RCTX>) -> VNode<RCTX> {
         VNode::Text(text)
-    }
-}
-
-impl<RCTX> Display for VText<RCTX> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.is_comment {
-            write!(f, "<!--{}-->", self.content)
-        } else {
-            write!(f, "{}", self.content)
-        }
     }
 }
 
@@ -149,21 +136,6 @@ pub mod test {
     use crate::{component::root_render_ctx, vdom::test::container};
     use wasm_bindgen_test::*;
 
-    #[test]
-    fn should_display_text() {
-        let text = VText::<()>::text("This is a very fine day!");
-        assert_eq!(format!("{}", text), "This is a very fine day!");
-    }
-
-    #[test]
-    fn should_display_comment() {
-        let comment = VText::<()>::comment("Something to remind the hacky users.");
-        assert_eq!(
-            format!("{}", comment),
-            "<!--Something to remind the hacky users.-->"
-        );
-    }
-
     #[wasm_bindgen_test]
     fn should_patch_container_with_new_text() {
         let mut vtext = VText::text("Hello World! It is nice to render.");
@@ -175,7 +147,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch the div");
+            )
+            .expect("To patch the div");
 
         assert_eq!(div.inner_html(), "Hello World! It is nice to render.");
     }
@@ -191,7 +164,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(div.inner_html(), "Hello World! It is nice to render.");
 
@@ -203,7 +177,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(div.inner_html(), "How you doing?");
     }
@@ -219,7 +194,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(div.inner_html(), "<!--This is a comment-->");
     }
@@ -235,7 +211,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(div.inner_html(), "<!--This is a comment-->");
 
@@ -246,7 +223,8 @@ pub mod test {
             None,
             root_render_ctx(),
             crate::message_sender(),
-        ).expect("To patch div");
+        )
+        .expect("To patch div");
 
         assert_eq!(div.inner_html(), "This is a text");
     }

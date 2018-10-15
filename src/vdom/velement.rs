@@ -2,12 +2,7 @@
 
 use crate::{component::Render, dom::DOMPatch, vdom::VNode, MessageSender, Shared};
 use indexmap::IndexMap;
-use std::{
-    borrow::Cow,
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    rc::Rc,
-};
+use std::{borrow::Cow, cell::RefCell, rc::Rc};
 use wasm_bindgen::{prelude::*, JsCast};
 use web_sys::{window, Element, Event, EventTarget, Node};
 
@@ -132,54 +127,6 @@ impl<RCTX> EventListener<RCTX> {
 impl<RCTX> From<VElement<RCTX>> for VNode<RCTX> {
     fn from(el: VElement<RCTX>) -> VNode<RCTX> {
         VNode::Element(el)
-    }
-}
-
-const VOID_TAGS: [&str; 14] = [
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
-    "track", "wbr",
-];
-
-impl<RCTX> Display for VElement<RCTX> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if VOID_TAGS.contains(&self.tag) {
-            write!(f, "<{}{}>", self.tag, self.attributes)?;
-            if !self.child.is_none() {
-                panic!(
-                    "Element with a void tag `{}` cannot have a child.",
-                    self.tag
-                );
-            } else {
-                Ok(())
-            }
-        } else {
-            write!(
-                f,
-                "<{tag}{attributes}>{child}</{tag}>",
-                tag = self.tag,
-                attributes = self.attributes,
-                child = self.child
-            )
-        }
-    }
-}
-
-impl Display for Attributes {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for (k, v) in self.0.iter() {
-            match v {
-                AttributeValue::String(ref v) => {
-                    write!(f, " {}=\"{}\"", k, v);
-                }
-                AttributeValue::Bool(truthy) => {
-                    if *truthy {
-                        write!(f, " {}=\"\"", k)?;
-                    }
-                }
-                AttributeValue::None => {}
-            }
-        }
-        Ok(())
     }
 }
 
@@ -506,40 +453,8 @@ impl From<Vec<Attribute>> for Attributes {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::{
-        component::root_render_ctx,
-        vdom::{test::container, vtext::VText},
-    };
+    use crate::{component::root_render_ctx, vdom::test::container};
     use wasm_bindgen_test::*;
-
-    #[test]
-    fn should_display_a_div() {
-        let div = VElement::<()>::childless("div", vec![], vec![]);
-        assert_eq!(format!("{}", div), "<div></div>");
-    }
-
-    #[test]
-    fn should_display_a_button_with_text() {
-        let button =
-            VElement::<()>::new("button", vec![], vec![], VNode::from(VText::text("Click")));
-        assert_eq!(format!("{}", button), "<button>Click</button>");
-    }
-
-    #[test]
-    fn should_display_an_attributed_p() {
-        let p = VElement::<()>::childless(
-            "p",
-            vec![
-                Attribute::new("class", "mt-3"),
-                Attribute::new("style", "background-color: grey;"),
-            ],
-            vec![],
-        );
-        assert_eq!(
-            format!("{}", p),
-            "<p class=\"mt-3\" style=\"background-color: grey;\"></p>"
-        );
-    }
 
     #[wasm_bindgen_test]
     fn should_patch_container_with_button_element() {

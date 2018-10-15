@@ -6,12 +6,7 @@ use crate::{
     vdom::{Shared, VNode},
     MessageSender,
 };
-use std::{
-    any::Any,
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    rc::Rc,
-};
+use std::{any::Any, cell::RefCell, rc::Rc};
 use wasm_bindgen::prelude::JsValue;
 use web_sys::Node;
 
@@ -97,7 +92,7 @@ impl<RCTX: Render> DOMPatch for VComponent<RCTX> {
     }
 }
 
-pub(crate) trait ComponentManager: Display + 'static {
+pub(crate) trait ComponentManager: 'static {
     type RenderContext;
 
     fn render_walk(
@@ -287,27 +282,6 @@ impl<RCTX> From<VComponent<RCTX>> for VNode<RCTX> {
     }
 }
 
-impl<RCTX> Display for VComponent<RCTX> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<COMP: Render, RCTX> Display for ComponentWrapper<COMP, RCTX>
-where
-    COMP::Events: FromEventProps<RCTX>,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.cached_render
-                .as_ref()
-                .expect("Render the component first.")
-        )
-    }
-}
-
 #[cfg(test)]
 pub mod test {
     use super::*;
@@ -384,7 +358,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(
             div.inner_html(),
@@ -402,7 +377,8 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(
             div.inner_html(),
@@ -417,14 +393,16 @@ pub mod test {
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).unwrap();
+            )
+            .unwrap();
         patched
             .render_walk(
                 div.as_ref(),
                 None,
                 root_render_ctx(),
                 crate::message_sender(),
-            ).expect("To patch div");
+            )
+            .expect("To patch div");
 
         assert_eq!(
             div.inner_html(),
