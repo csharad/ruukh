@@ -26,7 +26,7 @@ pub mod vtext;
 mod conversions;
 
 /// A virtual node in a virtual DOM tree.
-pub enum VNode<RCTX: Render> {
+pub enum VNode<RCTX> {
     /// A text vnode
     Text(VText<RCTX>),
     /// An element vnode
@@ -39,7 +39,7 @@ pub enum VNode<RCTX: Render> {
     None
 }
 
-impl<RCTX: Render> VNode<RCTX> {
+impl<RCTX> VNode<RCTX> {
     /// Whether the VNode is of `None` variant. 
     pub fn is_none(&self) -> bool {
         match self {
