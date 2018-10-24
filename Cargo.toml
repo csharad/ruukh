@@ -6,6 +6,7 @@ authors = ["Sharad Chand <sharad.d.chand@gmail.com>"]
 edition = "2018"
 license = "MIT"
 repository = "https://www.github.com/csharad/ruukh"
+documentation = "https://docs.rs/ruukh"
 readme = "./README.md"
 keywords = ["wasm", "frontend", "framework", "web"]
 categories = ["wasm", "web-programming"]
