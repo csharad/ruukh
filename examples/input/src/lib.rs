@@ -14,7 +14,7 @@ struct MainApp {
 impl Render for MainApp {
     fn render(&self) -> Markup<Self> {
         html! {
-            Name: <input @input={Self::on_input}/>
+            "Name: "<input @input={Self::on_input}/>
             {
                 if !self.input.is_empty() {
                     html! {
